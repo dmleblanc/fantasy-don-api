@@ -5,6 +5,7 @@ from typing import Dict, Any, List
 import boto3
 from botocore.exceptions import ClientError
 import time
+import polars as pl
 
 # Import NFL data library and utilities
 print(f"Checking for nflreadpy...")
@@ -95,26 +96,35 @@ def get_nfl_stats() -> Dict[str, Any]:
 
         print(f"Current calculated season: {current_season}, week {current_week}")
 
-        # Try to fetch current season data, fallback to 2024 if not available
+        # Try to fetch current season data, with graceful fallback for missing datasets
         try:
             print(f"Attempting to fetch {current_season} season data...")
             weekly_data = nfl.load_player_stats([current_season])
             schedules = nfl.load_schedules([current_season])
-            injuries = nfl.load_injuries([current_season])
-            projections = nfl.load_ff_rankings(kind="week")
             fetch_season = current_season
-            print(f"SUCCESS: Fetched {current_season} season data")
+            print(f"SUCCESS: Fetched {current_season} player stats and schedules")
+
+            # Try to load injuries for current season, fallback to empty if not available
+            try:
+                injuries = nfl.load_injuries([current_season])
+                print(f"SUCCESS: Fetched {current_season} injury data")
+            except Exception as injury_error:
+                print(f"WARNING: {current_season} injury data not available ({str(injury_error)}), using empty dataset")
+                injuries = pl.DataFrame()  # Empty dataframe
+
+            # Projections are always current week regardless of season
+            projections = nfl.load_ff_rankings()
+
         except Exception as e:
-            print(f"WARNING: {current_season} data not available ({str(e)}), falling back to 2024")
+            print(f"WARNING: {current_season} core data not available ({str(e)}), falling back to 2024")
             fetch_season = 2024
             weekly_data = nfl.load_player_stats([fetch_season])
             schedules = nfl.load_schedules([fetch_season])
             injuries = nfl.load_injuries([fetch_season])
-            projections = nfl.load_ff_rankings(kind="week")
+            projections = nfl.load_ff_rankings()
 
         # Transform data - return raw weekly data to split by week later
         print("Transforming data...")
-        import polars as pl
 
         # Get list of unique weeks from the data
         weeks = sorted(weekly_data['week'].unique().to_list()) if not weekly_data.is_empty() else []
@@ -128,15 +138,14 @@ def get_nfl_stats() -> Dict[str, Any]:
                 week_injuries = injuries.filter(pl.col('week') == week)
                 injury_data_by_week[week] = week_injuries
 
-        # Process projection data by week
+        # Process projection data - these are current week rankings without week/season columns
+        # Only apply to the current week since they represent current expert consensus
         projection_data_by_week = {}
-        if not projections.is_empty():
-            print(f"Processing {len(projections)} projection records")
-            # Filter projections for the current season
-            season_projections = projections.filter(pl.col('season') == fetch_season)
-            for week in weeks:
-                week_projections = season_projections.filter(pl.col('week') == week)
-                projection_data_by_week[week] = week_projections
+        if not projections.is_empty() and current_week is not None:
+            print(f"Processing {len(projections)} projection records for current week {current_week}")
+            # Only add projections for the current week
+            if current_week in weeks:
+                projection_data_by_week[current_week] = projections
 
         # Create data structure with weekly splits
         weekly_splits = {}
@@ -165,18 +174,21 @@ def get_nfl_stats() -> Dict[str, Any]:
                 )
 
             # Join projection data to player stats
+            # Projections use 'id' not 'player_id', and 'ecr' (expert consensus ranking)
+            # Cast id to string to match player_id type
             if week_projections is not None and not week_projections.is_empty():
                 enriched_data = enriched_data.join(
                     week_projections.select([
-                        'player_id',
-                        'projected_points',
-                        'rank',
-                        'tier'
+                        pl.col('id').cast(pl.Utf8).alias('id'),
+                        'ecr',  # expert consensus ranking
+                        'best',  # best ranking
+                        'worst',  # worst ranking
+                        'sd'  # standard deviation of rankings
                     ]),
                     left_on='player_id',
-                    right_on='player_id',
+                    right_on='id',
                     how='left',
-                    suffix='_proj'
+                    suffix='_ranking'
                 )
 
             players = transform_weekly_data_to_players(enriched_data, include_all_weeks=False)

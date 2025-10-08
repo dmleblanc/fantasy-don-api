@@ -14,4 +14,4 @@ RUN ls -la ${LAMBDA_TASK_ROOT}/
 
 # Lambda handler
 CMD [ "index.handler" ]
-# Force rebuild 2025-10-06-with-projections
+# Force rebuild 2025-10-07-graceful-injury-fallback
