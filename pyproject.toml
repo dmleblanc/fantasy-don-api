@@ -1,0 +1,34 @@
+[project]
+name = "fantasy-don-api"
+version = "0.1.0"
+description = "NFL stats data pipeline using AWS CDK"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "nfl-data-py>=0.3.0",
+    "pandas>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "aws-cdk-lib>=2.100.0",
+    "constructs>=10.0.0",
+    "pytest>=7.4.0",
+    "pytest-mock>=3.12.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+    "boto3>=1.28.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"

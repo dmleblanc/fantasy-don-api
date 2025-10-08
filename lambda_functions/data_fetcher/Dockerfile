@@ -1,0 +1,17 @@
+# Use AWS Lambda Python ARM64 base image to avoid polars illegal instruction errors
+FROM public.ecr.aws/lambda/python:3.11-arm64
+
+# Copy requirements and install dependencies
+COPY requirements.txt ${LAMBDA_TASK_ROOT}/
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy function code
+COPY index.py ${LAMBDA_TASK_ROOT}/
+COPY utils.py ${LAMBDA_TASK_ROOT}/
+
+# Verify files are copied
+RUN ls -la ${LAMBDA_TASK_ROOT}/
+
+# Lambda handler
+CMD [ "index.handler" ]
+# Force rebuild 2025-10-06-with-projections
