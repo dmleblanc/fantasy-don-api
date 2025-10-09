@@ -59,6 +59,7 @@ def get_weekly_stats(bucket_name: str, prefix: str, season: int, week: int) -> O
 def get_latest_stats(bucket_name: str, prefix: str) -> Optional[Dict[str, Any]]:
     """
     Retrieve the latest NFL stats from S3 (current week).
+    Reads from stats/latest.json which contains the most recent week's data.
 
     Args:
         bucket_name: S3 bucket name
@@ -68,21 +69,29 @@ def get_latest_stats(bucket_name: str, prefix: str) -> Optional[Dict[str, Any]]:
         Latest stats data or None if not found
     """
     try:
-        # Get metadata to find current season/week
-        metadata = get_metadata(bucket_name, prefix)
-        if not metadata:
-            return None
-
-        season = metadata.get("current_season")
-        week = metadata.get("current_week")
-
-        if not season or not week:
-            return None
-
-        # Get the current week's data
-        return get_weekly_stats(bucket_name, prefix, season, week)
-
+        # Try to read from latest.json first (most efficient)
+        latest_key = f"{prefix}latest.json"
+        response = s3_client.get_object(Bucket=bucket_name, Key=latest_key)
+        data = json.loads(response["Body"].read().decode("utf-8"))
+        return data
     except ClientError as e:
+        if e.response["Error"]["Code"] == "NoSuchKey":
+            # Fallback: read from metadata and get current week
+            print("latest.json not found, falling back to metadata lookup")
+            metadata = get_metadata(bucket_name, prefix)
+            if not metadata:
+                return None
+
+            season = metadata.get("current_season")
+            week = metadata.get("current_week")
+
+            if not season or not week:
+                return None
+
+            # Get the current week's data
+            return get_weekly_stats(bucket_name, prefix, season, week)
+
+        # Other errors - raise them
         print(f"Error retrieving latest stats: {e}")
         return None
 

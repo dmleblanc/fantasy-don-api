@@ -399,6 +399,45 @@ def save_to_s3(data: Dict[str, Any], bucket_name: str, prefix: str) -> Dict[str,
         if validation_errors_all_weeks:
             raise ValueError(f"Data validation failed for {len(validation_errors_all_weeks)} weeks: {validation_errors_all_weeks}")
 
+        # Save latest.json with the most recent week's data
+        if weekly_data:
+            # Get the latest week
+            latest_week = max(weekly_data.keys())
+            latest_week_info = weekly_data[latest_week]
+
+            latest_payload = {
+                "timestamp": now.isoformat(),
+                "source": "nflreadpy",
+                "data": {
+                    "players": latest_week_info["players"],
+                    "teams": data.get("aggregated_data", {}).get("teams", []),
+                    "games": data.get("aggregated_data", {}).get("games", [])
+                },
+                "metadata": {
+                    "season": season,
+                    "week": latest_week,
+                    "player_count": latest_week_info["player_count"],
+                    "fetch_date": data.get("metadata", {}).get("fetch_date"),
+                    "description": f"Latest stats from season {season}, week {latest_week}"
+                }
+            }
+
+            latest_key = f"{prefix}latest.json"
+            s3_client.put_object(
+                Bucket=bucket_name,
+                Key=latest_key,
+                Body=json.dumps(latest_payload, indent=2),
+                ContentType="application/json",
+                Metadata={
+                    "fetch_timestamp": now.isoformat(),
+                    "data_type": "nfl_latest_stats",
+                    "season": str(season),
+                    "week": str(latest_week),
+                },
+            )
+            saved_keys["latest"] = latest_key
+            print(f"✓ Latest stats (week {latest_week}) saved to s3://{bucket_name}/{latest_key}")
+
         # Save aggregated data (teams and games)
         aggregated = data.get("aggregated_data", {})
 

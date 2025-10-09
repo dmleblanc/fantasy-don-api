@@ -15,4 +15,4 @@ RUN ls -la ${LAMBDA_TASK_ROOT}/
 
 # Lambda handler
 CMD [ "index.handler" ]
-# Force rebuild 2025-10-08-inline-validation
+# Force rebuild 2025-10-08-update-latest-json
