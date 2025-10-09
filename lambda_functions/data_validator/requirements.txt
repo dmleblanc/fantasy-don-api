@@ -1,0 +1,2 @@
+# boto3 provided by Lambda runtime
+# No additional dependencies needed for validation

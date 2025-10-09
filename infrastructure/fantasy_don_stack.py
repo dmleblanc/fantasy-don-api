@@ -67,6 +67,27 @@ class FantasyDonStack(Stack):
         # Grant S3 write permissions to data fetcher
         stats_bucket.grant_write(data_fetcher_lambda)
 
+        # Data Validator Lambda Function (Containerized)
+        # Validates S3 data structure and quality
+        data_validator_lambda = lambda_.DockerImageFunction(
+            self,
+            "DataValidatorLambda",
+            function_name="nfl-data-validator",
+            code=lambda_.DockerImageCode.from_image_asset(
+                "lambda_functions/data_validator",
+            ),
+            architecture=lambda_.Architecture.ARM_64,
+            timeout=Duration.minutes(5),
+            memory_size=512,  # Lightweight validation
+            environment={
+                "BUCKET_NAME": stats_bucket.bucket_name,
+            },
+            log_retention=logs.RetentionDays.ONE_WEEK,
+        )
+
+        # Grant S3 read/write permissions to validator (needs write for audit reports)
+        stats_bucket.grant_read_write(data_validator_lambda)
+
         # EventBridge Rule to trigger data fetcher daily at midnight UTC
         daily_rule = events.Rule(
             self,
@@ -75,6 +96,23 @@ class FantasyDonStack(Stack):
             description="Triggers NFL stats data fetcher daily at midnight UTC",
         )
         daily_rule.add_target(targets.LambdaFunction(data_fetcher_lambda))
+
+        # EventBridge Rule to trigger validator daily at 1am UTC (after data fetch)
+        validation_rule = events.Rule(
+            self,
+            "DailyValidationRule",
+            schedule=events.Schedule.cron(minute="0", hour="1"),
+            description="Triggers data validation daily at 1am UTC (after data fetch)",
+        )
+        validation_rule.add_target(
+            targets.LambdaFunction(
+                data_validator_lambda,
+                event=events.RuleTargetInput.from_object({
+                    "validation_level": "standard",
+                    "seasons": [2024, 2025]
+                })
+            )
+        )
 
         # API Lambda Function
         api_lambda = lambda_.Function(
@@ -209,4 +247,11 @@ class FantasyDonStack(Stack):
             "ApiLambdaFunctionName",
             value=api_lambda.function_name,
             description="API Lambda function name",
+        )
+
+        CfnOutput(
+            self,
+            "DataValidatorFunctionName",
+            value=data_validator_lambda.function_name,
+            description="Data validator Lambda function name",
         )

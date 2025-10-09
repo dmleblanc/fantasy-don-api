@@ -30,6 +30,7 @@ from utils import (
     get_current_nfl_week,
     dataframe_to_dict_list,
 )
+from validation import DataValidator
 
 s3_client = boto3.client("s3")
 
@@ -347,8 +348,9 @@ def save_to_s3(data: Dict[str, Any], bucket_name: str, prefix: str) -> Dict[str,
     try:
         # Save each week's player data separately
         weekly_data = data.get("weekly_data", {})
+        validation_errors_all_weeks = []
+
         for week, week_info in weekly_data.items():
-            week_key = f"{prefix}weekly/season/{season}/week/{week}/data.json"
             week_payload = {
                 "timestamp": now.isoformat(),
                 "season": season,
@@ -361,6 +363,23 @@ def save_to_s3(data: Dict[str, Any], bucket_name: str, prefix: str) -> Dict[str,
                     "fetch_date": data.get("metadata", {}).get("fetch_date"),
                 }
             }
+
+            # VALIDATE DATA BEFORE WRITING TO S3
+            is_valid, errors = DataValidator.validate_weekly_data(week_payload, week)
+
+            if not is_valid:
+                error_msg = f"Week {week} validation FAILED: {errors}"
+                print(f"ERROR: {error_msg}")
+                validation_errors_all_weeks.append(error_msg)
+                # Skip writing invalid data to S3
+                continue
+
+            if errors:
+                # Has warnings but passed validation
+                print(f"Week {week} validation warnings: {errors}")
+
+            # Data is valid - write to S3
+            week_key = f"{prefix}weekly/season/{season}/week/{week}/data.json"
             s3_client.put_object(
                 Bucket=bucket_name,
                 Key=week_key,
@@ -374,7 +393,11 @@ def save_to_s3(data: Dict[str, Any], bucket_name: str, prefix: str) -> Dict[str,
                 },
             )
             saved_keys[f"week_{week}"] = week_key
-            print(f"Saved week {week} data to s3://{bucket_name}/{week_key}")
+            print(f"✓ Week {week} validated and saved to s3://{bucket_name}/{week_key}")
+
+        # If any week failed validation, raise error
+        if validation_errors_all_weeks:
+            raise ValueError(f"Data validation failed for {len(validation_errors_all_weeks)} weeks: {validation_errors_all_weeks}")
 
         # Save aggregated data (teams and games)
         aggregated = data.get("aggregated_data", {})
@@ -553,7 +576,6 @@ def save_to_s3(data: Dict[str, Any], bucket_name: str, prefix: str) -> Dict[str,
             print(f"Saved injury final for week {week} to s3://{bucket_name}/{final_key}")
 
         # Save metadata file for easy lookup of current season/week
-        metadata_key = f"{prefix}metadata.json"
         metadata_payload = {
             "timestamp": now.isoformat(),
             "current_season": season,
@@ -561,6 +583,18 @@ def save_to_s3(data: Dict[str, Any], bucket_name: str, prefix: str) -> Dict[str,
             "weeks_available": data.get("metadata", {}).get("weeks_available", []),
             "last_updated": now.isoformat(),
         }
+
+        # VALIDATE METADATA BEFORE WRITING TO S3
+        is_valid, errors = DataValidator.validate_metadata(metadata_payload)
+
+        if not is_valid:
+            raise ValueError(f"Metadata validation FAILED: {errors}")
+
+        if errors:
+            print(f"Metadata validation warnings: {errors}")
+
+        # Metadata is valid - write to S3
+        metadata_key = f"{prefix}metadata.json"
         s3_client.put_object(
             Bucket=bucket_name,
             Key=metadata_key,
@@ -572,7 +606,7 @@ def save_to_s3(data: Dict[str, Any], bucket_name: str, prefix: str) -> Dict[str,
             },
         )
         saved_keys["metadata"] = metadata_key
-        print(f"Saved metadata to s3://{bucket_name}/{metadata_key}")
+        print(f"✓ Metadata validated and saved to s3://{bucket_name}/{metadata_key}")
 
         return saved_keys
 
