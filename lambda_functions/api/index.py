@@ -228,15 +228,25 @@ def get_injury_data(bucket_name: str, prefix: str, data_type: str = "latest") ->
 
 def get_current_week_info() -> Dict[str, Any]:
     """
-    Get current NFL week and season information.
+    Get current NFL week and season information from metadata.
 
     Returns:
         Dict with current season, week, and metadata
     """
-    from utils import get_current_season, get_current_nfl_week
+    bucket_name = os.environ.get("BUCKET_NAME", "nfl-stats")
+    prefix = os.environ.get("DATA_PREFIX", "stats/")
 
-    season = get_current_season()
-    week = get_current_nfl_week()
+    # Read from metadata file (source of truth)
+    metadata = get_metadata(bucket_name, prefix)
+
+    if metadata:
+        season = metadata.get("current_season")
+        week = metadata.get("current_week")
+    else:
+        # Fallback to calculation if metadata not available
+        from utils import get_current_season, get_current_nfl_week
+        season = get_current_season()
+        week = get_current_nfl_week()
 
     return {
         "season": season,
@@ -245,6 +255,30 @@ def get_current_week_info() -> Dict[str, Any]:
         "season_start_date": f"{season}-09-07",  # Approximate start
         "calculated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def get_games_data(bucket_name: str, prefix: str, season: int) -> Optional[Dict[str, Any]]:
+    """
+    Retrieve game schedule data for a season from S3.
+
+    Args:
+        bucket_name: S3 bucket name
+        prefix: S3 key prefix
+        season: NFL season year
+
+    Returns:
+        Games data or None if not found
+    """
+    try:
+        games_key = f"{prefix}aggregated/season/{season}/games.json"
+        response = s3_client.get_object(Bucket=bucket_name, Key=games_key)
+        data = json.loads(response["Body"].read().decode("utf-8"))
+        return data
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "NoSuchKey":
+            print(f"No games data found at {games_key}")
+            return None
+        raise
 
 
 def get_available_weeks_for_season(bucket_name: str, prefix: str, season: int) -> list:
@@ -437,6 +471,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         GET /injuries/current - Get current injury report
         GET /injuries/changes - Get injury status changes from yesterday
         GET /injuries/week/{week} - Get injury report for specific week
+        GET /games/season/{season} - Get all games for a specific season
 
     Args:
         event: API Gateway event
@@ -494,6 +529,23 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 return create_response(200, injury_data)
             else:
                 return create_response(404, {"error": f"No injury data found for week {week}"})
+
+        elif "/games/season/" in path:
+            # Get all games for a specific season
+            season = path_parameters.get("season")
+            if not season:
+                return create_response(400, {"error": "Season required"})
+
+            try:
+                season = int(season)
+            except ValueError:
+                return create_response(400, {"error": "Invalid season format"})
+
+            games_data = get_games_data(bucket_name, data_prefix, season)
+            if games_data:
+                return create_response(200, games_data)
+            else:
+                return create_response(404, {"error": f"No games found for season {season}"})
 
         elif "/stats/season-totals" in path:
             # Get aggregated stats for all weeks in current season

@@ -225,7 +225,7 @@ def get_nfl_stats() -> Dict[str, Any]:
             "metadata": {
                 "fetch_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                 "season": fetch_season,
-                "current_week": current_week,
+                "current_week": max(weeks) if weeks else current_week,  # Use latest available week as current
                 "weeks_available": weeks,
                 "team_count": len(teams),
                 "game_count": len(games),

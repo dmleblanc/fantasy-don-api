@@ -9,6 +9,8 @@ from aws_cdk import (
     aws_events_targets as targets,
     aws_iam as iam,
     aws_logs as logs,
+    aws_cloudfront as cloudfront,
+    aws_cloudfront_origins as origins,
 )
 from constructs import Construct
 
@@ -218,6 +220,49 @@ class FantasyDonStack(Stack):
         injury_week_id_resource = injury_week_resource.add_resource("{week}")
         injury_week_id_resource.add_method("GET", lambda_integration)
 
+        # Games endpoints
+        games_resource = api.root.add_resource("games")
+
+        # GET /games/season/{season} - Get all games for a season
+        games_season_resource = games_resource.add_resource("season")
+        games_season_id_resource = games_season_resource.add_resource("{season}")
+        games_season_id_resource.add_method("GET", lambda_integration)
+
+        # CloudFront Distribution for API caching
+        # Caches API responses at edge locations to reduce latency and costs
+        cache_policy = cloudfront.CachePolicy(
+            self,
+            "NFLStatsAPICachePolicy",
+            cache_policy_name="NFLStatsAPICachePolicy",
+            comment="Cache policy for NFL Stats API - 1 hour cache, compress responses",
+            default_ttl=Duration.hours(1),  # Data updates daily at midnight UTC
+            min_ttl=Duration.minutes(5),
+            max_ttl=Duration.hours(24),
+            enable_accept_encoding_gzip=True,
+            enable_accept_encoding_brotli=True,
+            header_behavior=cloudfront.CacheHeaderBehavior.allow_list("Origin"),
+            query_string_behavior=cloudfront.CacheQueryStringBehavior.all(),
+        )
+
+        distribution = cloudfront.Distribution(
+            self,
+            "NFLStatsAPIDistribution",
+            comment="CloudFront distribution for NFL Stats API",
+            default_behavior=cloudfront.BehaviorOptions(
+                origin=origins.RestApiOrigin(
+                    api,
+                    origin_path="/prod",  # Include the API Gateway stage in origin path
+                ),
+                cache_policy=cache_policy,
+                origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                allowed_methods=cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+                cached_methods=cloudfront.CachedMethods.CACHE_GET_HEAD_OPTIONS,
+            ),
+            price_class=cloudfront.PriceClass.PRICE_CLASS_100,  # US, Canada, Europe
+            enable_logging=False,  # Can enable if needed for analytics
+        )
+
         # Outputs
         from aws_cdk import CfnOutput
 
@@ -254,4 +299,11 @@ class FantasyDonStack(Stack):
             "DataValidatorFunctionName",
             value=data_validator_lambda.function_name,
             description="Data validator Lambda function name",
+        )
+
+        CfnOutput(
+            self,
+            "CloudFrontURL",
+            value=f"https://{distribution.distribution_domain_name}",
+            description="CloudFront distribution URL (use this instead of API Gateway URL)",
         )
