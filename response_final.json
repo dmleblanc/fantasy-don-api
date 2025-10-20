@@ -1,1 +1,0 @@
-{"statusCode": 200, "body": "{\"message\": \"NFL stats fetched and stored successfully\", \"s3_key\": \"stats/2025/10/06/01-08-00.json\", \"bucket\": \"nfl-stats-923890204996-us-east-1\", \"timestamp\": \"2025-10-06T01:08:00.598936+00:00\", \"record_count\": {\"players\": 0, \"teams\": 0, \"games\": 0}}"}

@@ -226,6 +226,172 @@ def get_injury_data(bucket_name: str, prefix: str, data_type: str = "latest") ->
         raise
 
 
+def get_insights(bucket_name: str, prefix: str, season: int, week: int) -> Optional[Dict[str, Any]]:
+    """
+    Retrieve insights for a specific week from S3.
+
+    Args:
+        bucket_name: S3 bucket name
+        prefix: S3 key prefix
+        season: NFL season year
+        week: NFL week number
+
+    Returns:
+        Insights data or None if not found
+    """
+    try:
+        insights_key = f"insights/season/{season}/week/{week}/insights.json"
+        response = s3_client.get_object(Bucket=bucket_name, Key=insights_key)
+        data = json.loads(response["Body"].read().decode("utf-8"))
+        return data
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "NoSuchKey":
+            print(f"No insights found for season {season} week {week}")
+            return None
+        raise
+
+
+def get_latest_insights(bucket_name: str) -> Optional[Dict[str, Any]]:
+    """
+    Retrieve latest insights from S3.
+
+    Args:
+        bucket_name: S3 bucket name
+
+    Returns:
+        Latest insights data or None if not found
+    """
+    try:
+        insights_key = "insights/latest.json"
+        response = s3_client.get_object(Bucket=bucket_name, Key=insights_key)
+        data = json.loads(response["Body"].read().decode("utf-8"))
+        return data
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "NoSuchKey":
+            print("No latest insights found")
+            return None
+        raise
+
+
+def get_superlatives(bucket_name: str, season: int, week: int) -> Optional[Dict[str, Any]]:
+    """
+    Retrieve superlatives for a specific week from S3.
+
+    Args:
+        bucket_name: S3 bucket name
+        season: NFL season year
+        week: NFL week number
+
+    Returns:
+        Superlatives data or None if not found
+    """
+    try:
+        superlatives_key = f"insights/season/{season}/week/{week}/superlatives.json"
+        response = s3_client.get_object(Bucket=bucket_name, Key=superlatives_key)
+        data = json.loads(response["Body"].read().decode("utf-8"))
+        return data
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "NoSuchKey":
+            print(f"No superlatives found for season {season} week {week}")
+            return None
+        raise
+
+
+def get_comparison_insights(bucket_name: str, season: int, week_from: int, week_to: int) -> Optional[Dict[str, Any]]:
+    """
+    Retrieve pre-calculated insights comparing two weeks.
+
+    Args:
+        bucket_name: S3 bucket name
+        season: NFL season year
+        week_from: Starting week
+        week_to: Ending week
+
+    Returns:
+        Comparison insights data or None if not found
+    """
+    try:
+        insights_key = f"insights/season/{season}/comparisons/{week_from}-to-{week_to}/insights.json"
+        response = s3_client.get_object(Bucket=bucket_name, Key=insights_key)
+        data = json.loads(response["Body"].read().decode("utf-8"))
+        return data
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "NoSuchKey":
+            print(f"No comparison insights found for S{season} W{week_from}→W{week_to}")
+            return None
+        raise
+
+
+def get_comparison_superlatives(bucket_name: str, season: int, week_from: int, week_to: int) -> Optional[Dict[str, Any]]:
+    """
+    Retrieve pre-calculated superlatives comparing two weeks.
+
+    Args:
+        bucket_name: S3 bucket name
+        season: NFL season year
+        week_from: Starting week
+        week_to: Ending week
+
+    Returns:
+        Comparison superlatives data or None if not found
+    """
+    try:
+        superlatives_key = f"insights/season/{season}/comparisons/{week_from}-to-{week_to}/superlatives.json"
+        response = s3_client.get_object(Bucket=bucket_name, Key=superlatives_key)
+        data = json.loads(response["Body"].read().decode("utf-8"))
+        return data
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "NoSuchKey":
+            print(f"No comparison superlatives found for S{season} W{week_from}→W{week_to}")
+            return None
+        raise
+
+
+def get_comparisons_summary(bucket_name: str, season: int) -> Optional[Dict[str, Any]]:
+    """
+    Retrieve summary of all available week comparisons for a season.
+
+    Args:
+        bucket_name: S3 bucket name
+        season: NFL season year
+
+    Returns:
+        Summary data with all available comparisons
+    """
+    try:
+        summary_key = f"insights/season/{season}/comparisons/summary.json"
+        response = s3_client.get_object(Bucket=bucket_name, Key=summary_key)
+        data = json.loads(response["Body"].read().decode("utf-8"))
+        return data
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "NoSuchKey":
+            print(f"No comparisons summary found for S{season}")
+            return None
+        raise
+
+
+def filter_player_insights(insights_data: Dict[str, Any], player_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Filter insights data to get a specific player's insights.
+
+    Args:
+        insights_data: Full insights data
+        player_id: Player ID to filter for
+
+    Returns:
+        Player-specific insights or None if not found
+    """
+    player_insights = insights_data.get("player_insights", [])
+    for insight in player_insights:
+        if insight.get("player_id") == player_id:
+            return {
+                "season": insights_data.get("season"),
+                "week": insights_data.get("week"),
+                "player_insight": insight
+            }
+    return None
+
+
 def get_current_week_info() -> Dict[str, Any]:
     """
     Get current NFL week and season information from metadata.
@@ -472,6 +638,13 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         GET /injuries/changes - Get injury status changes from yesterday
         GET /injuries/week/{week} - Get injury report for specific week
         GET /games/season/{season} - Get all games for a specific season
+        GET /insights/latest - Get latest weekly insights
+        GET /insights/week/{week} - Get insights for specific week (current season)
+        GET /insights/season/{season}/week/{week} - Get insights for specific season/week
+        GET /insights/player/{player_id} - Get player-specific insights from latest week
+        GET /superlatives/latest - Get latest superlatives
+        GET /superlatives/week/{week} - Get superlatives for specific week (current season)
+        GET /superlatives/season/{season}/week/{week} - Get superlatives for specific season/week
 
     Args:
         event: API Gateway event
@@ -666,6 +839,130 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 return create_response(200, team_data)
             else:
                 return create_response(404, {"error": f"Team {team_id} not found"})
+
+        # === INSIGHTS ENDPOINTS ===
+        elif "/insights/latest" in path:
+            # Get latest insights
+            data = get_latest_insights(bucket_name)
+            if data:
+                return create_response(200, data)
+            else:
+                return create_response(404, {"error": "No insights available"})
+
+        elif "/insights/season/" in path and "/week/" in path:
+            # Get insights for specific season/week
+            season = path_parameters.get("season")
+            week = path_parameters.get("week")
+            if not season or not week:
+                return create_response(400, {"error": "Season and week required"})
+
+            try:
+                season_int = int(season)
+                week_int = int(week)
+            except ValueError:
+                return create_response(400, {"error": "Season and week must be numbers"})
+
+            data = get_insights(bucket_name, data_prefix, season_int, week_int)
+            if data:
+                return create_response(200, data)
+            else:
+                return create_response(404, {"error": f"No insights found for season {season} week {week}"})
+
+        elif "/insights/week/" in path:
+            # Get insights for specific week (current season)
+            week = path_parameters.get("week")
+            if not week:
+                return create_response(400, {"error": "Week number required"})
+
+            try:
+                week_int = int(week)
+            except ValueError:
+                return create_response(400, {"error": "Week must be a number"})
+
+            # Get current season from metadata
+            metadata = get_metadata(bucket_name, data_prefix)
+            if not metadata:
+                return create_response(404, {"error": "Metadata not available"})
+
+            season = metadata.get("current_season")
+            data = get_insights(bucket_name, data_prefix, season, week_int)
+            if data:
+                return create_response(200, data)
+            else:
+                return create_response(404, {"error": f"No insights found for week {week}"})
+
+        elif "/insights/player/" in path:
+            # Get player-specific insights from latest week
+            player_id = path_parameters.get("player_id")
+            if not player_id:
+                return create_response(400, {"error": "Player ID required"})
+
+            latest_insights = get_latest_insights(bucket_name)
+            if not latest_insights:
+                return create_response(404, {"error": "No insights available"})
+
+            player_insights = filter_player_insights(latest_insights, player_id)
+            if player_insights:
+                return create_response(200, player_insights)
+            else:
+                return create_response(404, {"error": f"Player {player_id} not found in insights"})
+
+        # === SUPERLATIVES ENDPOINTS ===
+        elif "/superlatives/latest" in path:
+            # Get latest superlatives
+            metadata = get_metadata(bucket_name, data_prefix)
+            if not metadata:
+                return create_response(404, {"error": "Metadata not available"})
+
+            season = metadata.get("current_season")
+            week = metadata.get("current_week")
+            data = get_superlatives(bucket_name, season, week)
+            if data:
+                return create_response(200, data)
+            else:
+                return create_response(404, {"error": "No superlatives available"})
+
+        elif "/superlatives/season/" in path and "/week/" in path:
+            # Get superlatives for specific season/week
+            season = path_parameters.get("season")
+            week = path_parameters.get("week")
+            if not season or not week:
+                return create_response(400, {"error": "Season and week required"})
+
+            try:
+                season_int = int(season)
+                week_int = int(week)
+            except ValueError:
+                return create_response(400, {"error": "Season and week must be numbers"})
+
+            data = get_superlatives(bucket_name, season_int, week_int)
+            if data:
+                return create_response(200, data)
+            else:
+                return create_response(404, {"error": f"No superlatives found for season {season} week {week}"})
+
+        elif "/superlatives/week/" in path:
+            # Get superlatives for specific week (current season)
+            week = path_parameters.get("week")
+            if not week:
+                return create_response(400, {"error": "Week number required"})
+
+            try:
+                week_int = int(week)
+            except ValueError:
+                return create_response(400, {"error": "Week must be a number"})
+
+            # Get current season from metadata
+            metadata = get_metadata(bucket_name, data_prefix)
+            if not metadata:
+                return create_response(404, {"error": "Metadata not available"})
+
+            season = metadata.get("current_season")
+            data = get_superlatives(bucket_name, season, week_int)
+            if data:
+                return create_response(200, data)
+            else:
+                return create_response(404, {"error": f"No superlatives found for week {week}"})
 
         elif path_parameters.get("date"):
             # Get stats by date (DEPRECATED - kept for backward compatibility)

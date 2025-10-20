@@ -90,6 +90,28 @@ class FantasyDonStack(Stack):
         # Grant S3 read/write permissions to validator (needs write for audit reports)
         stats_bucket.grant_read_write(data_validator_lambda)
 
+        # Insights Engine Lambda Function (Containerized)
+        # Generates week-over-week insights for players, teams, and defenses
+        insights_engine_lambda = lambda_.DockerImageFunction(
+            self,
+            "InsightsEngineLambda",
+            function_name="nfl-insights-engine",
+            code=lambda_.DockerImageCode.from_image_asset(
+                "lambda_functions/insights_engine",
+            ),
+            architecture=lambda_.Architecture.ARM_64,
+            timeout=Duration.minutes(5),
+            memory_size=512,  # Lightweight processing
+            environment={
+                "BUCKET_NAME": stats_bucket.bucket_name,
+                "DATA_PREFIX": "stats/",
+            },
+            log_retention=logs.RetentionDays.ONE_WEEK,
+        )
+
+        # Grant S3 read/write permissions to insights engine
+        stats_bucket.grant_read_write(insights_engine_lambda)
+
         # EventBridge Rule to trigger data fetcher daily at midnight UTC
         daily_rule = events.Rule(
             self,
@@ -115,6 +137,15 @@ class FantasyDonStack(Stack):
                 })
             )
         )
+
+        # EventBridge Rule to trigger insights engine daily at 00:15 UTC (15 min after data fetch)
+        insights_rule = events.Rule(
+            self,
+            "DailyInsightsRule",
+            schedule=events.Schedule.cron(minute="15", hour="0"),
+            description="Triggers NFL insights engine daily at 00:15 UTC (after data fetch)",
+        )
+        insights_rule.add_target(targets.LambdaFunction(insights_engine_lambda))
 
         # API Lambda Function
         api_lambda = lambda_.Function(
@@ -228,6 +259,49 @@ class FantasyDonStack(Stack):
         games_season_id_resource = games_season_resource.add_resource("{season}")
         games_season_id_resource.add_method("GET", lambda_integration)
 
+        # Insights endpoints
+        insights_resource = api.root.add_resource("insights")
+
+        # GET /insights/latest - Get latest weekly insights
+        latest_insights_resource = insights_resource.add_resource("latest")
+        latest_insights_resource.add_method("GET", lambda_integration)
+
+        # GET /insights/week/{week} - Get insights for specific week
+        insights_week_resource = insights_resource.add_resource("week")
+        insights_week_id_resource = insights_week_resource.add_resource("{week}")
+        insights_week_id_resource.add_method("GET", lambda_integration)
+
+        # GET /insights/season/{season}/week/{week} - Get insights for specific season/week
+        insights_season_resource = insights_resource.add_resource("season")
+        insights_season_id_resource = insights_season_resource.add_resource("{season}")
+        insights_season_week_resource = insights_season_id_resource.add_resource("week")
+        insights_season_week_id_resource = insights_season_week_resource.add_resource("{week}")
+        insights_season_week_id_resource.add_method("GET", lambda_integration)
+
+        # GET /insights/player/{player_id} - Get insights for specific player
+        insights_player_resource = insights_resource.add_resource("player")
+        insights_player_id_resource = insights_player_resource.add_resource("{player_id}")
+        insights_player_id_resource.add_method("GET", lambda_integration)
+
+        # Superlatives endpoints
+        superlatives_resource = api.root.add_resource("superlatives")
+
+        # GET /superlatives/latest - Get latest superlatives
+        latest_superlatives_resource = superlatives_resource.add_resource("latest")
+        latest_superlatives_resource.add_method("GET", lambda_integration)
+
+        # GET /superlatives/week/{week} - Get superlatives for specific week
+        superlatives_week_resource = superlatives_resource.add_resource("week")
+        superlatives_week_id_resource = superlatives_week_resource.add_resource("{week}")
+        superlatives_week_id_resource.add_method("GET", lambda_integration)
+
+        # GET /superlatives/season/{season}/week/{week} - Get superlatives for specific season/week
+        superlatives_season_resource = superlatives_resource.add_resource("season")
+        superlatives_season_id_resource = superlatives_season_resource.add_resource("{season}")
+        superlatives_season_week_resource = superlatives_season_id_resource.add_resource("week")
+        superlatives_season_week_id_resource = superlatives_season_week_resource.add_resource("{week}")
+        superlatives_season_week_id_resource.add_method("GET", lambda_integration)
+
         # CloudFront Distribution for API caching
         # Caches API responses at edge locations to reduce latency and costs
         cache_policy = cloudfront.CachePolicy(
@@ -299,6 +373,13 @@ class FantasyDonStack(Stack):
             "DataValidatorFunctionName",
             value=data_validator_lambda.function_name,
             description="Data validator Lambda function name",
+        )
+
+        CfnOutput(
+            self,
+            "InsightsEngineFunctionName",
+            value=insights_engine_lambda.function_name,
+            description="Insights engine Lambda function name",
         )
 
         CfnOutput(
