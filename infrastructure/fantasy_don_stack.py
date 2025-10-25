@@ -90,21 +90,22 @@ class FantasyDonStack(Stack):
         # Grant S3 read/write permissions to validator (needs write for audit reports)
         stats_bucket.grant_read_write(data_validator_lambda)
 
-        # EventBridge Rule to trigger data fetcher daily at midnight UTC
+        # EventBridge Rule to trigger data fetcher daily at 9am UTC (4-5am ET)
+        # NFLReadR updates player stats nightly at 3-5am ET, so fetch after processing completes
         daily_rule = events.Rule(
             self,
             "DailyDataFetchRule",
-            schedule=events.Schedule.cron(minute="0", hour="0"),
-            description="Triggers NFL stats data fetcher daily at midnight UTC",
+            schedule=events.Schedule.cron(minute="0", hour="9"),
+            description="Triggers NFL stats data fetcher daily at 9am UTC (4-5am ET, after NFLReadR nightly update)",
         )
         daily_rule.add_target(targets.LambdaFunction(data_fetcher_lambda))
 
-        # EventBridge Rule to trigger validator daily at 1am UTC (after data fetch)
+        # EventBridge Rule to trigger validator daily at 10am UTC (after data fetch)
         validation_rule = events.Rule(
             self,
             "DailyValidationRule",
-            schedule=events.Schedule.cron(minute="0", hour="1"),
-            description="Triggers data validation daily at 1am UTC (after data fetch)",
+            schedule=events.Schedule.cron(minute="0", hour="10"),
+            description="Triggers data validation daily at 10am UTC (after data fetch)",
         )
         validation_rule.add_target(
             targets.LambdaFunction(
