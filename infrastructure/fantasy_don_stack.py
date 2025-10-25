@@ -139,12 +139,12 @@ class FantasyDonStack(Stack):
             )
         )
 
-        # EventBridge Rule to trigger insights engine daily at 00:15 UTC (15 min after data fetch)
+        # EventBridge Rule to trigger insights engine daily at 9:15am UTC (15 min after data fetch)
         insights_rule = events.Rule(
             self,
             "DailyInsightsRule",
-            schedule=events.Schedule.cron(minute="15", hour="0"),
-            description="Triggers NFL insights engine daily at 00:15 UTC (after data fetch)",
+            schedule=events.Schedule.cron(minute="15", hour="9"),
+            description="Triggers NFL insights engine daily at 9:15am UTC (15 min after data fetch)",
         )
         insights_rule.add_target(targets.LambdaFunction(insights_engine_lambda))
 
@@ -310,7 +310,7 @@ class FantasyDonStack(Stack):
             "NFLStatsAPICachePolicy",
             cache_policy_name="NFLStatsAPICachePolicy",
             comment="Cache policy for NFL Stats API - 1 hour cache, compress responses",
-            default_ttl=Duration.hours(1),  # Data updates daily at midnight UTC
+            default_ttl=Duration.hours(1),  # Data updates daily at 9am UTC (4-5am ET)
             min_ttl=Duration.minutes(5),
             max_ttl=Duration.hours(24),
             enable_accept_encoding_gzip=True,

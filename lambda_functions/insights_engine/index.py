@@ -34,25 +34,41 @@ def handler(event, context):
 
     persistence = S3Persistence(bucket_name, data_prefix)
 
-    # Determine current season and week
-    metadata = persistence.read_metadata()
-    if not metadata:
-        return {
-            'statusCode': 500,
-            'body': json.dumps({'error': 'No metadata found - data fetcher may not have run yet'})
-        }
+    # Check if event specifies custom weeks (for testing/comparisons)
+    if event.get('week_from') and event.get('week_to'):
+        # Custom week comparison mode
+        current_season = event.get('season', 2025)
+        week_from = event['week_from']
+        week_to = event['week_to']
+        print(f"Custom comparison mode: Season {current_season}, Week {week_from} → Week {week_to}")
+    else:
+        # Normal mode - use metadata to determine current week
+        metadata = persistence.read_metadata()
+        if not metadata:
+            return {
+                'statusCode': 500,
+                'body': json.dumps({'error': 'No metadata found - data fetcher may not have run yet'})
+            }
 
-    current_season = metadata.get('current_season')
-    current_week = metadata.get('current_week')
+        current_season = metadata.get('current_season')
+        week_from = metadata.get('current_week') - 1  # Previous week
+        week_to = metadata.get('current_week')  # Current week
+        print(f"Processing insights for Season {current_season}, Week {week_to}")
 
-    print(f"Processing insights for Season {current_season}, Week {current_week}")
-
-    # Validate that weekly stats exist
-    if not persistence.check_week_exists(current_season, current_week):
+    # Validate that weekly stats exist for both weeks
+    if not persistence.check_week_exists(current_season, week_to):
         return {
             'statusCode': 400,
             'body': json.dumps({
-                'error': f'No data found for S{current_season}W{current_week}'
+                'error': f'No data found for S{current_season}W{week_to}'
+            })
+        }
+
+    if not persistence.check_week_exists(current_season, week_from):
+        return {
+            'statusCode': 400,
+            'body': json.dumps({
+                'error': f'No data found for S{current_season}W{week_from}'
             })
         }
 
@@ -61,21 +77,22 @@ def handler(event, context):
         insights_output = generate_insights(
             persistence,
             current_season,
-            current_week
+            week_to,
+            week_from
         )
 
         # Write insights to S3
         persistence.write_insights(
             insights_output.to_dict(),
             current_season,
-            current_week
+            week_to
         )
 
         # Write superlatives separately
         persistence.write_superlatives(
             insights_output.superlatives,
             current_season,
-            current_week
+            week_to
         )
 
         # Write latest snapshot
@@ -92,7 +109,12 @@ def handler(event, context):
             'body': json.dumps({
                 'message': 'Insights generated successfully',
                 'season': current_season,
-                'week': current_week,
+                'week_from': week_from,
+                'week_to': week_to,
+                'players': insights_output.player_insights,
+                'teams': insights_output.team_insights,
+                'defenses': insights_output.defense_insights,
+                'superlatives': insights_output.superlatives,
                 'stats': {
                     'player_insights': len(insights_output.player_insights),
                     'team_insights': len(insights_output.team_insights),
@@ -115,13 +137,14 @@ def handler(event, context):
 def generate_insights(
     persistence: S3Persistence,
     season: int,
-    week: int
+    week_to: int,
+    week_from: int = None
 ) -> InsightsOutput:
     """
     Main insights generation logic
 
-    Reads 3 weeks of data (N, N-1, N-2)
-    Calculates trends and deltas
+    Compares week_from to week_to (or uses previous week if not specified)
+    Reads up to 3 weeks of data for trend analysis
     Returns InsightsOutput
     """
     # Initialize calculators
@@ -130,14 +153,19 @@ def generate_insights(
     defense_calc = DefenseInsightsCalculator()
     superlatives_calc = SuperlativesCalculator()
 
-    # Determine weeks to fetch (current + 2 previous)
+    # If week_from not specified, default to previous week
+    if week_from is None:
+        week_from = week_to - 1
+
+    # Determine weeks to fetch (include week before week_from for trends)
     weeks_to_fetch = []
-    if week >= 3:
-        weeks_to_fetch = [week - 2, week - 1, week]
-    elif week == 2:
-        weeks_to_fetch = [week - 1, week]
+    if week_from >= 2:
+        weeks_to_fetch = [week_from - 1, week_from, week_to]
     else:
-        weeks_to_fetch = [week]
+        weeks_to_fetch = [week_from, week_to]
+
+    # Deduplicate and sort
+    weeks_to_fetch = sorted(list(set(weeks_to_fetch)))
 
     print(f"Fetching weeks: {weeks_to_fetch}")
 
@@ -145,11 +173,14 @@ def generate_insights(
     weekly_data = persistence.read_multiple_weeks(season, weeks_to_fetch)
 
     # Extract current week and previous weeks
-    current_data = weekly_data.get(week)
-    previous_data = weekly_data.get(week - 1) if week > 1 else None
+    current_data = weekly_data.get(week_to)
+    previous_data = weekly_data.get(week_from)
 
     if not current_data:
-        raise Exception(f"No data found for current week {week}")
+        raise Exception(f"No data found for week {week_to}")
+
+    if not previous_data:
+        raise Exception(f"No data found for week {week_from}")
 
     # Extract player lists
     # Handle both old format (data: []) and new format (data: {players: []})
@@ -200,7 +231,7 @@ def generate_insights(
             player_previous=player_previous,
             player_history=player_history,
             season=season,
-            week=week
+            week=week_to
         )
 
         player_insights.append(insight)
@@ -249,7 +280,7 @@ def generate_insights(
             players_current=team_players_current,
             players_previous=team_players_previous,
             season=season,
-            week=week
+            week=week_to
         )
 
         team_insights.append(insight)
@@ -265,13 +296,13 @@ def generate_insights(
     # === GENERATE SUPERLATIVES ===
     print("Generating superlatives...")
     superlatives = superlatives_calc.generate_all_superlatives(
-        player_insights, season, week
+        player_insights, season, week_to
     )
 
     # === BUILD OUTPUT ===
     output = InsightsOutput(
         season=season,
-        week=week,
+        week=week_to,
         player_insights=[p.to_dict() for p in player_insights],
         team_insights=[t.to_dict() for t in team_insights],
         defense_insights=[d.to_dict() for d in defense_insights],

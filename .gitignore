@@ -63,3 +63,6 @@ config
 # Claude
 .claude/
 .venv/
+
+# Test outputs
+scripts/test-insights/outputs/
