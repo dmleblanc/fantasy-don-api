@@ -55,11 +55,6 @@ node_modules/
 htmlcov/
 .tox/
 
-# Temporary files
-response*.json
-refetch.json
-test_*.json
-
 # AWS
 *.pem
 credentials
